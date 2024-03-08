@@ -11,7 +11,7 @@
 # under the License.
 import sys
 
-from opensearchpy import helpers as os_helpers
+from opensearchpy import helpers
 from opensearchpy import OpenSearch
 
 
@@ -29,7 +29,7 @@ def generate_os_host_list(hosts):
 
 def create_index(client, json_list, index):
     try:
-        response = os_helpers.bulk(
+        response = helpers.bulk(
             client,
             json_list,
             index=index

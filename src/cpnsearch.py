@@ -15,9 +15,10 @@ import os
 import sys
 import logging
 
-from sphinx_opensearch.common.clients import create_index
-from sphinx_opensearch.common.clients import Searchclient
+from src.common.clients import create_index
+from src.common.clients import Searchclient
 
+# https://strapi.partners.otc-service.com/api/partners?populate=localizations&populate=features.localizations&populate=tags&populate=quotes.localizations&sort[0]=partner_id&pagination[pageSize]=5&pagination[page]=2
 
 def get_parser():
     # Format the output of help
@@ -29,7 +30,7 @@ def get_parser():
         help='Option enables Debug output.'
     )
     parser.add_argument(
-        '--delete-index',
+        '--delete-indices',
         action='store_true',
         help='Option deletes old index with the same name and creates new '
              'one.'
@@ -39,21 +40,21 @@ def get_parser():
         metavar='<host:port>',
         nargs='+',
         default=['localhost:9200'],
-        help='Provide one or multiple host:port values '
-             'separated by space for multiple hosts.\n'
+        help='Provide one or multiple host:port values for Opensearch '
+             'separated by space for multiple entries.\n'
              'Default: localhost:9200'
     )
     parser.add_argument(
-        '--index',
-        metavar='<index>',
-        default='test-index',
-        help="OpenSearch / ElasticSearch index name.\n"
-             'Default: test-index'
+        '--index-prefix',
+        metavar='<index_prefix>',
+        default='cpn-',
+        help="OpenSearch index prefix.\n"
+             'Default: cpn-'
     )
     parser.add_argument(
         '--password',
         metavar='<password>',
-        help='Password for the connection.'
+        help='Password for the Opensearch connection.'
     )
     parser.add_argument(
         '--post-count',
@@ -76,7 +77,7 @@ def get_parser():
     parser.add_argument(
         '--user',
         metavar='<username>',
-        help='Username for the connection.'
+        help='Username for the Opensearch connection.'
     )
 
     args = parser.parse_args()
@@ -105,54 +106,38 @@ def get_user(args):
     return user
 
 
-def delete_index(client, index):
+def delete_indices(client, index_prefix):
     try:
-        client.indices.delete(index=index, ignore=[400, 404])
+        # delete indices with wildcard
+        client.indices.delete(index=index_prefix + '*', ignore=[400, 404])
     except Exception as e:
-        sys.exit('Exception raised while index deletion:\n' + str(e))
+        sys.exit('Exception raised while indices deletion:\n' + str(e))
 
-def create_index_data(client, path, file_structure,
-                      index, post_count, base_url,
-                      doc_url, category):
-    json_list = []
+def create_index_data(client, index_prefix):
     responses = []
-    file_structure_length = len(file_structure)
-    i = 0
-    count = 0
-    for file in file_structure:
-        file_path = path + file + '.fjson'
-        try:
-            file = open(file_path,)
-            data = json.load(file)
-            data['base_url'] = base_url
-            data['doc_url'] = doc_url
-            data['category'] = category
-            data["body"] = BeautifulSoup(data["body"], "lxml").text
-            file.close()
-        except Exception as e:
-            sys.exit("\nERROR:\n" + str(e))
-        json_list.append(data)
-        file_structure_length -= 1
-        i += 1
-        count += 1
-        if (i < post_count) and (file_structure_length != 0):
-            continue
-        else:
-            resp = create_index(
-                client=client,
-                json_list=json_list,
-                index=index,
-            )
-            responses.append(resp)
-            json_list = []
-            i = 0
+    data = {}
+    data["body"] = "hallo Sebastian"
+
+    resp = client.index(
+        index = (index_prefix + '1'),
+        body = data,
+        id = 'axxon',
+        # refresh = True
+    )
+    responses.append(resp)
 
     json_response = {
-        'responses': responses,
-        'uploaded_files': count
+        'responses': responses
     }
     return json_response
 
+def get_client(user, hosts):
+    client = Searchclient(
+        username=user['name'],
+        password=user['password'],
+        hosts=hosts
+    )
+    return client.connect()
 
 def main():
     args = get_parser()
@@ -161,31 +146,17 @@ def main():
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
-    client = Searchclient(
-        username=user['name'],
-        password=user['password'],
-        hosts=args.hosts
-    )
-    client = client.connect()
+    client = get_client(user, args.hosts)
 
-    if args.delete_index:
-        delete_index(client=client, index=args.index)
-
-    base_url = add_end_slash(args.base_url)
+    if args.delete_indices:
+        delete_indices(client=client, index_prefix=args.index_prefix)
 
     response = create_index_data(
         client=client,
-        path=path,
-        file_structure=file_structure,
-        index=args.index,
-        post_count=args.post_count,
-        base_url=base_url,
-        doc_url=doc_url,
-        category=args.category
+        index_prefix=args.index_prefix,
     )
 
-    console.log(str(response['uploaded_files']) + ' new files successfully imported'
-          ' to index ' + args.index)
+    logging.info(response)
 
 
 if __name__ == "__main__":
