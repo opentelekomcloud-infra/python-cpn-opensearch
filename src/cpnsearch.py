@@ -10,15 +10,15 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 import argparse
-import json
 import os
 import sys
 import logging
 
-from src.common.clients import create_index
 from src.common.clients import Searchclient
+import requests
 
 # https://strapi.partners.otc-service.com/api/partners?populate=localizations&populate=features.localizations&populate=tags&populate=quotes.localizations&sort[0]=partner_id&pagination[pageSize]=5&pagination[page]=2
+
 
 def get_parser():
     # Format the output of help
@@ -72,7 +72,7 @@ def get_parser():
     parser.add_argument(
         '--strapi-url',
         metavar='<strapi_url>',
-        help='URL to Strapi API'
+        help='Base URL to Strapi'
     )
     parser.add_argument(
         '--user',
@@ -113,23 +113,64 @@ def delete_indices(client, index_prefix):
     except Exception as e:
         sys.exit('Exception raised while indices deletion:\n' + str(e))
 
-def create_index_data(client, index_prefix):
+
+def strapi_request(strapi_token, strapi_url, page):
+    url = (strapi_url + '/api/partners?populate=localizations&populate='
+           'features.localizations&'
+           'populate=tags&populate=quotes.localizations&sort[0]=partner_id&'
+           'pagination[pageSize]=5&pagination[page]=' + str(page))
+    headers = {
+        'Authorization': 'Bearer ' + strapi_token
+    }
+    try:
+        response = requests.get(url, headers=headers)
+    except requests.exceptions.RequestException as e:
+        sys.exit("Issue while Strapi request: ", e)
+    return response.json()
+
+
+def index_data(client, index_prefix, strapi_url, strapi_token):
+    index_name = "partners"
+    index = index_prefix + index_name
     responses = []
     data = {}
-    data["body"] = "hallo Sebastian"
+    page = 1
+    not_finished = True
 
-    resp = client.index(
-        index = (index_prefix + '1'),
-        body = data,
-        id = 'axxon',
-        # refresh = True
-    )
-    responses.append(resp)
+    while not_finished:
+        data = strapi_request(strapi_token, strapi_url, page)
+        bulk_data = []
+
+        # check for existing data
+        if len(data["data"]) > 0:
+            # format retrieved partners and prepare for bulk POST request
+            for partner in data["data"]:
+                partner_id = partner["attributes"]["partner_id"]
+                create_command = {"create": {
+                    "_index": index,
+                    "_id": partner_id
+                }
+                }
+                bulk_data.append(create_command)
+                bulk_data.append(partner)
+            # Bulk operation to upload multiple partners
+            try:
+                responses.append(client.bulk(bulk_data))
+            except Exception as e:
+                sys.exit("Issue while bulk request: ", e)
+        else:
+            sys.exit("No data found")
+
+        page_count = data["meta"]["pagination"]["pageCount"]
+        if page_count == page:
+            not_finished = False
+        page = page + 1
 
     json_response = {
         'responses': responses
     }
     return json_response
+
 
 def get_client(user, hosts):
     client = Searchclient(
@@ -139,10 +180,12 @@ def get_client(user, hosts):
     )
     return client.connect()
 
+
 def main():
     args = get_parser()
     user = get_user(args)
 
+    logging.basicConfig(level=logging.INFO)
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
@@ -151,9 +194,11 @@ def main():
     if args.delete_indices:
         delete_indices(client=client, index_prefix=args.index_prefix)
 
-    response = create_index_data(
+    response = index_data(
         client=client,
         index_prefix=args.index_prefix,
+        strapi_url=args.strapi_url,
+        strapi_token=args.strapi_token,
     )
 
     logging.info(response)
