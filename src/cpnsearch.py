@@ -52,6 +52,14 @@ def get_parser():
              'Default: cpn-'
     )
     parser.add_argument(
+        '--locales',
+        metavar='<locales>',
+        nargs='+',  # List of locale elements
+        default=['en', 'de-DE'],
+        help="OpenSearch locales\n"
+            'Default: ["en", "de-DE"]'
+    )
+    parser.add_argument(
         '--password',
         metavar='<password>',
         help='Password for the Opensearch connection.'
@@ -114,10 +122,9 @@ def delete_indices(client, index_prefix):
         sys.exit('Exception raised while indices deletion:\n' + str(e))
 
 
-def strapi_request(strapi_token, strapi_url, page):
-    url = (strapi_url + '/api/partners?populate=localizations&populate='
-           'features.localizations&'
-           'populate=tags&populate=quotes.localizations&sort[0]=partner_id&'
+def strapi_request(strapi_token, strapi_url, page, locale):
+    url = (strapi_url + '/api/partners?locale=' + locale + '&populate'
+           '=features&populate=tags&populate=quotes&sort[0]=partner_id&'
            'pagination[pageSize]=5&pagination[page]=' + str(page))
     headers = {
         'Authorization': 'Bearer ' + strapi_token
@@ -129,8 +136,9 @@ def strapi_request(strapi_token, strapi_url, page):
     return response.json()
 
 
-def index_data(client, index_prefix, strapi_url, strapi_token):
-    index_name = "partners"
+def index_data(client, index_prefix, strapi_url, strapi_token, locale):
+    language_code = locale.split('-')[0]
+    index_name = "partners-" + language_code
     index = index_prefix + index_name
     responses = []
     data = {}
@@ -138,7 +146,11 @@ def index_data(client, index_prefix, strapi_url, strapi_token):
     not_finished = True
 
     while not_finished:
-        data = strapi_request(strapi_token, strapi_url, page)
+        data = strapi_request(
+            strapi_token=strapi_token,
+            strapi_url=strapi_url,
+            page=page,
+            locale=locale)
         bulk_data = []
 
         # check for existing data
@@ -193,16 +205,21 @@ def main():
 
     if args.delete_indices:
         delete_indices(client=client, index_prefix=args.index_prefix)
-
-    response = index_data(
-        client=client,
-        index_prefix=args.index_prefix,
-        strapi_url=args.strapi_url,
-        strapi_token=args.strapi_token,
-    )
-
-    logging.info(response)
-
+    
+    if args.locales:
+        locales = args.locales
+        print('Indexing data for locales: ', locales) 
+        for locale in locales:
+            response = index_data(
+                client=client,
+                index_prefix=args.index_prefix,
+                strapi_url=args.strapi_url,
+                strapi_token=args.strapi_token,
+                locale=locale
+            )
+            logging.info(response)
+    else:
+        sys.exit('No locales specified.')
 
 if __name__ == "__main__":
     main()

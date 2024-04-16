@@ -1,6 +1,8 @@
 CHANGES
 =======
 
+* write README
+* finish import tool for CPN -> Opensearch
 * prepare Opensearch input
 * init
 * Initial commit
